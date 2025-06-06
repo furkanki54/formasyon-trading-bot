@@ -1,0 +1,1 @@
+python auto_pattern_alert.py
