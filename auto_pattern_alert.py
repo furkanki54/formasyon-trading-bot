@@ -1,48 +1,58 @@
 import requests
 import pandas as pd
-from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, BINANCE_API_BASE
-from telebot import TeleBot
-from pattern_utils import detect_tobo, detect_obo, detect_w, detect_cup_handle
-from chart_drawer import draw_chart
+import matplotlib.pyplot as plt
+from io import BytesIO
+from telegram import Bot
+from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, BINANCE_BASE_URL
 
-bot = TeleBot(TELEGRAM_TOKEN)
+bot = Bot(token=TELEGRAM_TOKEN)
 
-def get_klines(symbol="BTCUSDT", interval="1h", limit=100):
-    url = f"{BINANCE_API_BASE}/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}"
-    r = requests.get(url)
-    data = r.json()
+def get_ohlcv(symbol, interval="1h", limit=100):
+    url = f"{BINANCE_BASE_URL}/api/v3/klines"
+    params = {"symbol": symbol.upper(), "interval": interval, "limit": limit}
+    res = requests.get(url, params=params)
+    data = res.json()
     df = pd.DataFrame(data, columns=[
         "time", "open", "high", "low", "close", "volume",
-        "close_time", "quote_asset_volume", "number_of_trades",
-        "taker_buy_base_volume", "taker_buy_quote_volume", "ignore"
+        "close_time", "quote_asset_volume", "num_trades",
+        "taker_buy_base", "taker_buy_quote", "ignore"
     ])
+    df["close"] = df["close"].astype(float)
+    df["low"] = df["low"].astype(float)
+    df["high"] = df["high"].astype(float)
     df["time"] = pd.to_datetime(df["time"], unit='ms')
-    df["close"] = pd.to_numeric(df["close"])
-    return df[["time", "close"]]
+    return df
 
-def detect_patterns(df):
-    patterns = []
+def detect_tobo(df):
+    last = df["close"].iloc[-5:]
+    if last.iloc[0] > last.iloc[1] < last.iloc[2] > last.iloc[3] < last.iloc[4]:
+        return True
+    return False
+
+def draw_chart(df, symbol, pattern_name="TOBO"):
+    plt.figure(figsize=(10, 5))
+    plt.plot(df["time"], df["close"], label="Close", color="blue")
+    plt.title(f"{symbol} - {pattern_name} Formasyonu")
+    plt.xticks(rotation=45)
+    plt.grid(True)
+    plt.legend()
+
+    buffer = BytesIO()
+    plt.savefig(buffer, format='png')
+    buffer.seek(0)
+    plt.close()
+    return buffer
+
+def analyze_symbol(symbol):
+    df = get_ohlcv(symbol)
     if detect_tobo(df):
-        patterns.append("TOBO")
-    if detect_obo(df):
-        patterns.append("OBO")
-    if detect_w(df):
-        patterns.append("W")
-    if detect_cup_handle(df):
-        patterns.append("Fincan-Kulp")
-    return patterns
-
-def main():
-    symbol = "BTCUSDT"
-    df = get_klines(symbol, interval="1h", limit=100)
-    patterns = detect_patterns(df)
-    if patterns:
-        image_path = draw_chart(df, symbol, patterns)
-        message = f"📊 {symbol} grafik sinyali tespit edildi: {', '.join(patterns)}"
-        with open(image_path, "rb") as photo:
-            bot.send_photo(TELEGRAM_CHAT_ID, photo, caption=message)
+        chart = draw_chart(df, symbol, "TOBO")
+        bot.send_photo(chat_id=TELEGRAM_CHAT_ID, photo=chart,
+                       caption=f"📈 {symbol} için TOBO formasyonu tespit edildi!")
     else:
-        bot.send_message(TELEGRAM_CHAT_ID, f"{symbol} için formasyon bulunamadı.")
+        print(f"{symbol} için formasyon yok.")
 
 if __name__ == "__main__":
-    main()
+    coin_list = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
+    for coin in coin_list:
+        analyze_symbol(coin)
