@@ -1,3 +1,4 @@
 requests
 pandas
 ta
+pyTelegramBotAPI==4.14.1
