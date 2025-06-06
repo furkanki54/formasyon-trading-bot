@@ -1,1 +1,1 @@
-worker: python3 auto_pattern_alert.py
+worker: python3 main.py
