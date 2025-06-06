@@ -1,7 +1,5 @@
 import requests
-import time
 import numpy as np
-from datetime import datetime
 from telebot import TeleBot
 
 # Telegram ayarları
@@ -12,8 +10,8 @@ bot = TeleBot(TOKEN)
 # Binance API URL
 BASE_URL = 'https://fapi.binance.com'
 
-# Analiz yapılacak coin listesi (sadece Binance Futures’ta listeli coinler)
-COIN_LIST = [
+# Sadece bu coinlerde çalışacak
+ALLOWED_COINS = [
     'BTCUSDT', 'ETHUSDT', 'BCHUSDT', 'XRPUSDT', 'LTCUSDT', 'TRXUSDT', 'ETCUSDT', 'LINKUSDT',
     'XLMUSDT', 'ADAUSDT', 'XMRUSDT', 'DASHUSDT', 'ZECUSDT', 'XTZUSDT', 'BNBUSDT', 'ATOMUSDT',
     'ONTUSDT', 'IOTAUSDT', 'BATUSDT', 'VETUSDT', 'NEOUSDT', 'QTUMUSDT', 'IOSTUSDT', 'THETAUSDT',
@@ -35,7 +33,11 @@ COIN_LIST = [
     'HFTUSDT', 'XVSUSDT', 'ETHBTC', 'BLURUSDT', 'EDUUSDT', 'SUIUSDT', '1000PEPEUSDT'
 ]
 
-# RSI hesapla
+def get_klines(symbol, interval='1h', limit=100):
+    url = f"{BASE_URL}/fapi/v1/klines?symbol={symbol}&interval={interval}&limit={limit}"
+    data = requests.get(url).json()
+    return [float(kline[4]) for kline in data]
+
 def calculate_rsi(data, period=14):
     delta = np.diff(data)
     gain = np.maximum(delta, 0)
@@ -46,7 +48,6 @@ def calculate_rsi(data, period=14):
     rsi = 100 - (100 / (1 + rs))
     return rsi[-1]
 
-# EMA hesapla
 def calculate_ema(data, period):
     ema = []
     k = 2 / (period + 1)
@@ -57,7 +58,6 @@ def calculate_ema(data, period):
             ema.append(data[i] * k + ema[-1] * (1 - k))
     return ema[-1]
 
-# MACD hesapla
 def calculate_macd(data):
     ema12 = calculate_ema(data, 12)
     ema26 = calculate_ema(data, 26)
@@ -65,85 +65,62 @@ def calculate_macd(data):
     signal = calculate_ema([macd]*9, 9)
     return macd, signal
 
-# Binance’tan veri al
-def get_klines(symbol, interval='1h', limit=100):
-    url = f"{BASE_URL}/fapi/v1/klines?symbol={symbol}&interval={interval}&limit={limit}"
-    response = requests.get(url)
-    data = response.json()
-    return [float(candle[4]) for candle in data]
-
-# Telegram’a gönder
-def send_to_telegram(message):
-    bot.send_message(chat_id=CHAT_ID, text=message)
-
-# Teknik analiz
-def analyze(symbol):
+def analyze_coin(symbol):
     intervals = ['15m', '1h', '4h', '1d']
-    rsi_scores = []
-    macd_scores = []
-    ema_scores = []
+    scores = []
+    fiyat = None
 
     for interval in intervals:
         try:
             closes = get_klines(symbol, interval)
-            if len(closes) < 30:
+            if not closes:
                 continue
             rsi = calculate_rsi(closes)
             ema50 = calculate_ema(closes, 50)
             ema200 = calculate_ema(closes, 200)
             macd, signal = calculate_macd(closes)
 
-            # RSI puanı
-            if rsi > 70:
-                rsi_score = 2
-            elif rsi < 30:
-                rsi_score = 2
-            else:
-                rsi_score = 1
+            fiyat = closes[-1]
 
-            # MACD puanı
-            macd_score = 2 if macd > signal else 1
+            rsi_score = 9 if rsi < 30 else 2 if rsi > 70 else 6
+            ema_score = 9 if closes[-1] > ema50 > ema200 else 2 if closes[-1] < ema50 < ema200 else 5
+            macd_score = 8 if macd > signal else 3
 
-            # EMA puanı
-            ema_score = 2 if closes[-1] > ema50 and closes[-1] > ema200 else 1
-
-            rsi_scores.append(rsi_score)
-            macd_scores.append(macd_score)
-            ema_scores.append(ema_score)
+            scores.append((rsi_score + ema_score + macd_score)/3)
         except:
             continue
 
-    if not rsi_scores:
-        return
+    if not scores:
+        return "Yeterli veri yok veya analiz yapılamadı."
 
-    total_score = np.mean(rsi_scores + macd_scores + ema_scores) * 10 / 6
-    total_score = round(total_score, 2)
+    avg_score = round(np.mean(scores), 2)
 
-    if total_score >= 8:
-        yorum = "🚀 Piyasa güçlü boğa eğiliminde"
-    elif total_score >= 6:
-        yorum = "📈 Piyasa boğa başlangıcında"
-    elif total_score >= 4:
+    if avg_score >= 8:
+        yorum = "🚀 Güçlü boğa trendi"
+    elif avg_score >= 6.5:
+        yorum = "📈 Boğa başlangıcı"
+    elif avg_score >= 4:
         yorum = "⚖️ Piyasa nötr"
-    elif total_score >= 2:
-        yorum = "📉 Piyasa ayı başlangıcında"
     else:
-        yorum = "🐻 Güçlü ayı piyasası"
+        yorum = "📉 Ayı baskısı"
 
-    fiyat = get_klines(symbol)[-1]
-    mesaj = f"""📊 Teknik Analiz: {symbol}
-Fiyat: {fiyat} USDT
+    return f"""📊 Teknik Analiz: {symbol}
+Fiyat: {round(fiyat, 2)} USDT
 ———————————————
-🔹 RSI Puanları: {rsi_scores}
-🔹 MACD Puanları: {macd_scores}
-🔹 EMA Puanları: {ema_scores}
-———————————————
-🎯 Ortalama Puan: {total_score}/10
+🎯 Ortalama Puan: {avg_score}/10
 💬 Yorum: {yorum}
 """
-    send_to_telegram(mesaj)
 
-# Tüm coinleri sırayla analiz et
-for coin in COIN_LIST:
-    analyze(coin)
-    time.sleep(2)
+@bot.message_handler(func=lambda msg: True)
+def handle_message(message):
+    coin = message.text.strip().upper()
+    if not coin.endswith("USDT"):
+        coin += "USDT"
+    if coin not in ALLOWED_COINS:
+        bot.send_message(message.chat.id, f"❌ {coin} desteklenen coin listesinde yok.")
+        return
+    sonuc = analyze_coin(coin)
+    bot.send_message(message.chat.id, sonuc)
+
+print("Bot çalışıyor...")
+bot.polling()
