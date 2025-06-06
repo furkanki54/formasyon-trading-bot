@@ -2,7 +2,7 @@ import telebot
 import requests
 import statistics
 from config import TELEGRAM_TOKEN, CHAT_ID
-from coin_list import COIN_LIST
+from coin_list import coin_list
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 
