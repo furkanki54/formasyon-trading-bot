@@ -1,58 +1,108 @@
-import telebot
 import requests
-import statistics
-from config import TELEGRAM_TOKEN, CHAT_ID
+import numpy as np
+import telebot
+from datetime import datetime
+from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID
 from coin_list import coin_list
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 
-def get_technical_data(symbol):
-    # Örnek veri – senin gerçek analiz fonksiyonlarınla entegre edilecek
-    data = {
-        'price': 0.718,
-        'rsi': [1, 1, 2, 1],
-        'macd': [1, 1, 1, 1],
-        'ema': [1, 1, 1, 1]
-    }
-    return data
+intervals = {
+    "15m": "15 dakika",
+    "1h": "1 saat",
+    "4h": "4 saat",
+    "1d": "1 gün"
+}
 
-def interpret_score(avg):
-    if avg >= 7:
-        return "🐂 Güçlü boğa piyasası"
-    elif avg >= 5:
-        return "📈 Boğa başlangıcı"
-    elif avg >= 3:
+def get_klines(symbol, interval, limit=100):
+    url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}"
+    response = requests.get(url)
+    return response.json()
+
+def calculate_rsi(close_prices, period=14):
+    deltas = np.diff(close_prices)
+    seed = deltas[:period]
+    up = seed[seed >= 0].sum() / period
+    down = -seed[seed < 0].sum() / period
+    rs = up / down if down != 0 else 0
+    rsi = 100 - (100 / (1 + rs))
+    return rsi
+
+def calculate_macd(close_prices, fast=12, slow=26, signal=9):
+    exp1 = np.mean(close_prices[-fast:])
+    exp2 = np.mean(close_prices[-slow:])
+    macd_line = exp1 - exp2
+    signal_line = np.mean(close_prices[-signal:])
+    return macd_line, signal_line
+
+def calculate_ema(close_prices, period):
+    return np.mean(close_prices[-period:])
+
+def score_rsi(rsi):
+    if rsi > 70:
+        return 3
+    elif rsi > 60:
+        return 2
+    elif rsi > 50:
+        return 1
+    else:
+        return 0
+
+def score_macd(macd, signal):
+    return 3 if macd > signal else 0
+
+def score_ema(last_price, ema50, ema200):
+    if last_price > ema50 and last_price > ema200:
+        return 3
+    elif last_price > ema50 or last_price > ema200:
+        return 2
+    else:
+        return 0
+
+def yorumla(puan):
+    if puan >= 8:
+        return "🚀 Boğa piyasası"
+    elif puan >= 5:
         return "⚖️ Nötr"
     else:
-        return "🐻 Güçlü ayı piyasası"
+        return "🐻 Ayı piyasası"
 
 @bot.message_handler(func=lambda message: True)
 def handle_message(message):
-    symbol = message.text.upper()
-    if symbol not in COIN_LIST:
-        bot.send_message(message.chat.id, f"❌ '{symbol}' desteklenmiyor.")
+    coin = message.text.upper()
+
+    if coin not in coin_list:
+        bot.send_message(message.chat.id, f"❌ '{coin}' desteklenen coin listesinde yok.")
         return
 
-    try:
-        data = get_technical_data(symbol)
-        avg_score = round(statistics.mean(data['rsi'] + data['macd'] + data['ema']), 2)
-        yorum = interpret_score(avg_score)
+    rsi_scores, macd_scores, ema_scores = [], [], []
+    for interval in intervals:
+        klines = get_klines(coin, interval)
+        close_prices = [float(k[4]) for k in klines]
+        last_price = close_prices[-1]
+        rsi = calculate_rsi(close_prices)
+        macd, signal = calculate_macd(close_prices)
+        ema50 = calculate_ema(close_prices, 50)
+        ema200 = calculate_ema(close_prices, 100)
 
-        text = (
-            f"📊 Teknik Analiz: {symbol}\n"
-            f"Fiyat: {data['price']} USDT\n"
-            f"———————————————\n"
-            f"🔹 RSI Puanları: {data['rsi']}\n"
-            f"🔹 MACD Puanları: {data['macd']}\n"
-            f"🔹 EMA Puanları: {data['ema']}\n"
-            f"———————————————\n"
-            f"🎯 Ortalama Puan: {avg_score}/10\n"
-            f"💬 Yorum: {yorum}"
-        )
-        bot.send_message(message.chat.id, text)
+        rsi_scores.append(score_rsi(rsi))
+        macd_scores.append(score_macd(macd, signal))
+        ema_scores.append(score_ema(last_price, ema50, ema200))
 
-    except Exception as e:
-        bot.send_message(message.chat.id, f"❗️Hata oluştu: {e}")
+    all_scores = rsi_scores + macd_scores + ema_scores
+    avg_score = round(sum(all_scores) / len(all_scores), 2)
+    yorum = yorumla(avg_score)
 
-if __name__ == '__main__':
-    bot.polling()
+    msg = f"""📊 Teknik Analiz: {coin}
+Fiyat: {round(last_price, 4)} USDT
+———————————————
+🔹 RSI Puanları: {rsi_scores}
+🔹 MACD Puanları: {macd_scores}
+🔹 EMA Puanları: {ema_scores}
+———————————————
+🎯 Ortalama Puan: {avg_score}/10
+💬 Yorum: {yorum}
+"""
+    bot.send_message(message.chat.id, msg)
+
+bot.polling()
