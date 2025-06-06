@@ -1,16 +1,9 @@
 import requests
 import pandas as pd
 import ta
-import time
 from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, BINANCE_BASE_URL
 
 URL = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
-
-def get_updates(offset=None):
-    url = f"{URL}/getUpdates"
-    params = {"offset": offset, "timeout": 10}
-    res = requests.get(url, params=params)
-    return res.json()
 
 def get_ohlcv(symbol, interval="1h", limit=100):
     url = f"{BINANCE_BASE_URL}/api/v3/klines"
@@ -23,12 +16,11 @@ def get_ohlcv(symbol, interval="1h", limit=100):
         "taker_buy_base", "taker_buy_quote", "ignore"
     ])
     df["close"] = df["close"].astype(float)
-    df["volume"] = df["volume"].astype(float)
     return df
 
-def analyze(symbol):
+def analyze(symbol, interval):
     try:
-        df = get_ohlcv(symbol)
+        df = get_ohlcv(symbol, interval)
         df["rsi"] = ta.momentum.RSIIndicator(df["close"], window=14).rsi()
         df["ema50"] = ta.trend.EMAIndicator(df["close"], window=50).ema_indicator()
         df["ema200"] = ta.trend.EMAIndicator(df["close"], window=200).ema_indicator()
@@ -43,73 +35,73 @@ def analyze(symbol):
         macd_sig = df["macd_signal"].iloc[-1]
         price = df["close"].iloc[-1]
 
-        if rsi < 30:
-            rsi_score = 9
-            rsi_comment = "Aşırı satımda, toparlanabilir."
-        elif rsi > 70:
-            rsi_score = 2
-            rsi_comment = "Aşırı alımda, düzeltme gelebilir."
-        else:
-            rsi_score = 6
-            rsi_comment = "Nötr"
+        # RSI puanı
+        rsi_score = 9 if rsi < 30 else 2 if rsi > 70 else 6
 
+        # EMA puanı
         if price > ema50 > ema200:
             ema_score = 9
-            ema_comment = "Güçlü boğa trendi"
         elif price < ema50 < ema200:
             ema_score = 2
-            ema_comment = "Ayı baskısı yüksek"
         else:
             ema_score = 5
-            ema_comment = "Kararsız EMA"
 
+        # MACD puanı
         if macd_val > macd_sig:
             macd_score = 8
-            macd_comment = "Pozitif MACD"
         elif macd_val < macd_sig:
             macd_score = 3
-            macd_comment = "Negatif MACD"
         else:
             macd_score = 5
-            macd_comment = "MACD zayıf"
 
-        total_score = round((rsi_score + ema_score + macd_score) / 3, 2)
-        sentiment = "📈 Boğa" if total_score >= 6.5 else "📉 Ayı" if total_score <= 4 else "⚖️ Kararsız"
+        total = round((rsi_score + ema_score + macd_score) / 3, 2)
+        return total
 
-        message = f"""
-📊 Teknik Analiz: {symbol.upper()}
-Fiyat: {round(price,2)} USDT
-———————————————
-📈 RSI: {round(rsi,2)} — {rsi_comment}
-📉 EMA: 50={round(ema50,2)} | 200={round(ema200,2)} — {ema_comment}
-📊 MACD: {round(macd_val,2)} / {round(macd_sig,2)} — {macd_comment}
-———————————————
-🎯 Puan: {total_score}/10
-💬 Yorum: {sentiment}
-"""
-        return message
     except Exception as e:
-        return f"{symbol.upper()} için analiz hatası: {e}"
+        return f"Hata: {e}"
+
+def genel_yorum(ortalama):
+    if isinstance(ortalama, str):
+        return "Analiz başarısız."
+    if ortalama >= 8:
+        return "🚀 Güçlü boğa trendi"
+    elif ortalama >= 6.5:
+        return "🟢 Piyasa boğa başlangıcında"
+    elif ortalama >= 4:
+        return "⚖️ Piyasa nötr"
+    else:
+        return "📉 Piyasa ayı bölgesinde"
 
 def send_message(text):
     url = f"{URL}/sendMessage"
     payload = {"chat_id": TELEGRAM_CHAT_ID, "text": text}
     requests.post(url, data=payload)
 
-def listen_for_commands():
-    offset = None
-    while True:
-        updates = get_updates(offset)
-        if "result" in updates:
-            for update in updates["result"]:
-                offset = update["update_id"] + 1
-                message = update.get("message", {})
-                text = message.get("text", "").strip().lower()
-                if text.isalpha():
-                    symbol = text.upper() + "USDT"
-                    result = analyze(symbol)
-                    send_message(result)
-        time.sleep(5)
+def main():
+    symbol = "BTCUSDT"  # Değiştirilebilir
+    intervals = [("15dk", "15m"), ("1saat", "1h"), ("4saat", "4h"), ("1gün", "1d")]
+    results = []
+
+    for name, interval in intervals:
+        score = analyze(symbol, interval)
+        if isinstance(score, str):
+            results.append(f"🕒 {name}: analiz hatalı")
+        else:
+            results.append(f"🕒 {name} → {score}/10")
+
+    puanlar = [analyze(symbol, i[1]) for i in intervals]
+    sayisal = [p for p in puanlar if not isinstance(p, str)]
+    ortalama = round(sum(sayisal) / len(sayisal), 2) if sayisal else "N/A"
+    yorum = genel_yorum(ortalama)
+
+    mesaj = f"""📊 Gelişmiş Teknik Analiz: {symbol}
+
+{chr(10).join(results)}
+
+🎯 Genel Puan: {ortalama}/10
+💬 Yorum: {yorum}
+"""
+    send_message(mesaj)
 
 if __name__ == "__main__":
-    listen_for_commands()
+    main()
