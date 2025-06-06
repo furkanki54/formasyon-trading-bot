@@ -2,10 +2,7 @@ import requests
 import pandas as pd
 import matplotlib.pyplot as plt
 from io import BytesIO
-from telegram import Bot
 from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, BINANCE_BASE_URL
-
-bot = Bot(token=TELEGRAM_TOKEN)
 
 def get_ohlcv(symbol, interval="1h", limit=100):
     url = f"{BINANCE_BASE_URL}/api/v3/klines"
@@ -43,12 +40,19 @@ def draw_chart(df, symbol, pattern_name="TOBO"):
     plt.close()
     return buffer
 
+def send_photo_to_telegram(image_buffer, caption):
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"
+    files = {"photo": ("chart.png", image_buffer.getvalue())}
+    data = {"chat_id": TELEGRAM_CHAT_ID, "caption": caption}
+    response = requests.post(url, data=data, files=files)
+    print("Telegram yanıtı:", response.text)
+
 def analyze_symbol(symbol):
     df = get_ohlcv(symbol)
     if detect_tobo(df):
         chart = draw_chart(df, symbol, "TOBO")
-        bot.send_photo(chat_id=TELEGRAM_CHAT_ID, photo=chart,
-                       caption=f"📈 {symbol} için TOBO formasyonu tespit edildi!")
+        caption = f"📈 {symbol} için TOBO formasyonu tespit edildi!"
+        send_photo_to_telegram(chart, caption)
     else:
         print(f"{symbol} için formasyon yok.")
 
