@@ -2,7 +2,7 @@ import telebot
 import requests
 import pandas as pd
 
-# Telegram bilgiler
+# 📌 Sabit Telegram Token ve Chat ID
 TOKEN = "7759276451:AAF0Xphio-TjtYyFIzahQrG3fU-qdNQuBEw"
 CHAT_ID = "-1002549376225"
 bot = telebot.TeleBot(TOKEN)
@@ -106,7 +106,6 @@ def analyze_coin(symbol):
             macd_scores.append(0)
             ema_scores.append(0)
 
-    # Ortalama hesap
     ortalama_puan = round((sum(rsi_scores) + sum(macd_scores) + sum(ema_scores)) / 12, 2)
 
     if ortalama_puan >= 7:
@@ -116,7 +115,6 @@ def analyze_coin(symbol):
     else:
         yorum = "⚖️ Kararsız bölge"
 
-    # Fiyat çek
     try:
         fiyat = float(requests.get(f"https://api.binance.com/api/v3/ticker/price?symbol={symbol}").json()["price"])
     except:
