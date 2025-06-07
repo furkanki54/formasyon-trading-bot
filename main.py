@@ -2,12 +2,11 @@ import telebot
 import requests
 import pandas as pd
 
-# 📌 Sabit Telegram Token ve Chat ID
-TOKEN = "7759276451:AAF0Xphio-TjtYyFIzahQrG3fU-qdNQuBEw"
-CHAT_ID = "-1002549376225"
+# ✅ Yeni çalışan TOKEN buraya eklendi
+TOKEN = "8078903959:AAF37zwfzT1lJXqgob_3bCxEeiDgbRSow3w"
 bot = telebot.TeleBot(TOKEN)
 
-# Binance'ten fiyat verisi çekme
+# Binance'ten fiyat verisi çek
 def get_klines(symbol, interval, limit=100):
     url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}"
     response = requests.get(url)
@@ -61,7 +60,7 @@ def calculate_macd(close_prices, fast=12, slow=26, signal=9):
     histogram = macd_line - signal_line
     return float(macd_line.iloc[-1]), float(signal_line.iloc[-1]), float(histogram.iloc[-1])
 
-# MACD puanı ver
+# MACD puanla
 def score_macd(macd_line, signal_line, histogram):
     if macd_line > signal_line and histogram > 0:
         if histogram > 50:
@@ -132,7 +131,7 @@ Fiyat: {fiyat} USDT
 """
     return mesaj
 
-# Telegram mesajlarını dinle
+# Telegram'da mesaj gelince analiz yap
 @bot.message_handler(func=lambda message: True)
 def handle_message(message):
     text = message.text.strip().upper()
